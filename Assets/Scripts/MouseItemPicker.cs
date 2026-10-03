@@ -1,27 +1,39 @@
 using UnityEngine;
+using TMPro;
 
 public class MouseItemPicker : MonoBehaviour
 {
+    [Header("Ustawienia Zasięgu")]
     public float maxClickDistance = 3f; // Promień poziomy (szerokość)
     public Transform playerTransform;   // Przeciągnij tutaj transform gracza
     public float heightMultiplier = 2f; // Wysokość elipsy (jajowate Gizmo)
 
+    [Header("Referencje i Slot")]
     public Inventory inv;
+    public UILvl1 uiLvl1;               // Przypisz tutaj obiekt z komponentem UILvl1
+    public int carriedItemsCount = 0;   // Licznik aktualnie niesionych przedmiotów
+    public int maxSlots = 3;            // Maksymalnie 3 sloty w rękach
+
+    // Tablica przechowująca sprite'y niesionych przedmiotów
+    private Sprite[] carriedSprites = new Sprite[3];
+
+    [Header("UI / Komunikaty (World Space)")]
+    public TextMeshProUGUI promptText;  // Przeciągnij tutaj swój tekst World Space TMP
+    public Vector3 textOffset = new Vector3(0, 1.2f, 0); // Przesunięcie napisu nad przedmiotem
 
     void Update()
     {
-        // Kiedy klikniesz lewym przyciskiem myszy
+        // 1. Sprawdzamy co jest pod kursorem (HOVER)
+        HandleHover();
+
+        // 2. Kiedy klikniesz lewym przyciskiem myszy
         if (Input.GetMouseButtonDown(0))
         {
-            // Pobieramy pozycję kliknięcia myszką w świecie gry (2D)
             Vector2 mousePosition = Camera.main.ScreenToWorldPoint(Input.mousePosition);
-
-            // Strzelamy promieniem w punkt kliknięcia myszką
             RaycastHit2D hit = Physics2D.Raycast(mousePosition, Vector2.zero);
 
             if (hit.collider != null)
             {
-                // Sprawdzamy czy kliknięty obiekt ma nasz komponent przedmiotu
                 ItemsPickUpLVL1 item = hit.collider.GetComponent<ItemsPickUpLVL1>();
 
                 if (item != null)
@@ -29,76 +41,132 @@ public class MouseItemPicker : MonoBehaviour
                     Transform target = playerTransform != null ? playerTransform : transform;
                     float distance = Vector2.Distance(target.position, hit.transform.position);
                     
-                    // Sprawdzamy czy gracz jest w zasięgu
                     if (distance <= maxClickDistance)
                     {
-                        // Wywołujemy funkcję interakcji
-                        Interact(item, hit.collider.gameObject);
+                        if (item.iD == -1 || carriedItemsCount < maxSlots)
+                        {
+                            Interact(item, hit.collider.gameObject);
+                        }
+                        else
+                        {
+                            Debug.Log("[PLECAK PEŁNY] Masz już 3 przedmioty w rękach!");
+                        }
                     }
                     else
                     {
-                        // ZA DALEKO
-                        Debug.Log($"[ZA DALEKO] Przedmiot '{item.itemName}' (ID: {item.iD}) jest za daleko! Dystans: {distance:F2}m.");
+                        Debug.Log($"[ZA DALEKO] Przedmiot '{item.itemName}' jest za daleko!");
                     }
                 }
             }
         }
     }
 
-    // Funkcja interakcji (podnoszenie, niszczenie i miejsce na Twoją logikę)
-    // Funkcja interakcji (podnoszenie, niszczenie i dodawanie do ekwipunku po ID)
+    // Obsługa najeżdżania myszką (Hover) i pozycjonowania tekstu w World Space
+    void HandleHover()
+    {
+        Vector2 mousePosition = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+        RaycastHit2D hit = Physics2D.Raycast(mousePosition, Vector2.zero);
+
+        if (hit.collider != null)
+        {
+            ItemsPickUpLVL1 item = hit.collider.GetComponent<ItemsPickUpLVL1>();
+
+            if (item != null)
+            {
+                Transform target = playerTransform != null ? playerTransform : transform;
+                float distance = Vector2.Distance(target.position, hit.transform.position);
+
+                string actionStatus = "";
+
+                // Określamy stan
+                if (distance > maxClickDistance)
+                {
+                    actionStatus = "to far";
+                }
+                else if (item.iD != -1 && carriedItemsCount >= maxSlots)
+                {
+                    actionStatus = "no more space";
+                }
+                else
+                {
+                    actionStatus = "Interact";
+                }
+
+                // Formatowanie tekstu
+                string displayText = $"{item.itemName}\n- {actionStatus}";
+
+                if (promptText != null)
+                {
+                    // Ustawiamy pozycję tekstu bezpośrednio w świecie gry + offset
+                    promptText.transform.position = hit.collider.transform.position + textOffset;
+
+                    promptText.text = displayText;
+                    promptText.gameObject.SetActive(true);
+                }
+                return;
+            }
+        }
+
+        // Jeśli kursor nie jest nad przedmiotem, wyłączamy tekst
+        if (promptText != null)
+        {
+            promptText.text = "";
+            promptText.gameObject.SetActive(false);
+        }
+    }
+
+    // Funkcja interakcji (obsługa ekwipunku, slotów, depozytu i UI)
     void Interact(ItemsPickUpLVL1 item, GameObject itemObject)
     {
-        Debug.Log($"[INTERAKCJA] Podniesiono: '{item.itemName}' | ID: {item.iD}");
+        Debug.Log($"[INTERAKCJA] Kliknięto: '{item.itemName}' | ID: {item.iD}");
 
-        // Sprawdzamy czy masz przypisany skrypt Inventory w inspektorze
         if (inv != null)
         {
-            // Switch po ID przedmiotu z poziomu skryptu ItemsPickUpLVL1
             switch (item.iD)
             {
-                case 0:
-                    inv.water++;
-                    Debug.Log("Dodano wodę! Stan: " + inv.water);
+                case -1:
+                    Debug.Log("[PIWNICA] Zdeponowano zasoby! Opróżniono sloty.");
+                    carriedItemsCount = 0;
+                    System.Array.Clear(carriedSprites, 0, carriedSprites.Length); // Czścimy tablicę sprite'ów
+                    
+                    if (uiLvl1 != null) uiLvl1.UiUpdate(carriedSprites);
                     break;
 
-                case 1:
-                    inv.food++;
-                    Debug.Log("Dodano jedzenie/konserwę! Stan: " + inv.food);
+                case 0: 
+                    inv.water++; 
+                    AddCarryItem(itemObject);
                     break;
-
-                case 2:
-                    inv.axe++;
-                    Debug.Log("Dodano siekierę! Stan: " + inv.axe);
+                case 1: 
+                    inv.food++; 
+                    AddCarryItem(itemObject);
                     break;
-
-                case 3:
-                    inv.flashlight++;
-                    Debug.Log("Dodano latarkę! Stan: " + inv.flashlight);
+                case 2: 
+                    inv.axe++; 
+                    AddCarryItem(itemObject);
                     break;
-
-                case 4:
-                    inv.backpack++;
-                    Debug.Log("Dodano plecak! Stan: " + inv.backpack);
+                case 3: 
+                    inv.flashlight++; 
+                    AddCarryItem(itemObject);
                     break;
-
-                case 5:
-                    inv.medkit++;
-                    Debug.Log("Dodano apteczkę! Stan: " + inv.medkit);
+                case 4: 
+                    inv.backpack++; 
+                    AddCarryItem(itemObject);
                     break;
-
-                case 6:
-                    inv.radio++;
-                    Debug.Log("Dodano radio! Stan: " + inv.radio);
+                case 5: 
+                    inv.medkit++; 
+                    AddCarryItem(itemObject);
                     break;
-
-                case 7:
-                    inv.tape++;
-                    Debug.Log("Dodano taśmę! Stan: " + inv.tape);
+                case 6: 
+                    inv.radio++; 
+                    AddCarryItem(itemObject);
+                    break;
+                case 7: 
+                    inv.tape++; 
+                    AddCarryItem(itemObject);
                     break;
 
                 default:
-                    Debug.LogWarning($"Nieznane ID przedmiotu: {item.iD} (Może to śmieć / pułapka?)");
+                    Debug.LogWarning($"Nieznane ID przedmiotu: {item.iD}");
                     break;
             }
         }
@@ -107,8 +175,29 @@ public class MouseItemPicker : MonoBehaviour
             Debug.LogError("Brak przypisanego Inventory w MouseItemPicker!");
         }
 
-        // Niszczenie fizycznego obiektu z mapy
-        Destroy(itemObject);
+        // Niszczymy obiekt z mapy TYLKO JEŚLI TO NIE JEST DEPOZYT (-1)
+        if (item.iD != -1)
+        {
+            Destroy(itemObject);
+        }
+    }
+
+    // Pomocnicza metoda do pobierania sprite'a z podnoszonego obiektu i aktualizacji UI
+    void AddCarryItem(GameObject itemObject)
+    {
+        SpriteRenderer sr = itemObject.GetComponent<SpriteRenderer>();
+        Sprite itemSprite = sr != null ? sr.sprite : null;
+
+        if (carriedItemsCount < maxSlots)
+        {
+            carriedSprites[carriedItemsCount] = itemSprite;
+            carriedItemsCount++;
+
+            if (uiLvl1 != null)
+            {
+                uiLvl1.UiUpdate(carriedSprites);
+            }
+        }
     }
 
     // Rysuje jajowate Gizmo w oknie Scene
